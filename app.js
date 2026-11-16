@@ -1,5 +1,14 @@
 const DATA_URL = "data/lessons.json";
-const DAYS = ["Poniedziałek","Wtorek","Środa","Czwartek","Piątek"];
+const CHANGES_URL = "data/changes.json";
+const DAYS = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek"];
+const state = { mode: "teacher", view: "search", lessons: [], changes: [], meta: {}, changesMeta: {} };
+const input = document.querySelector("#search-input");
+const results = document.querySelector("#results");
+const labels = {
+  teacher: ["KOD NAUCZYCIELA", "Np. Ga, Zi, WE…", "Wpisz kod nauczyciela, np. Ga albo WE.", "Wyszukaj nauczyciela"],
+  room: ["NUMER SALI", "Np. 204, SG3, Aula…", "Wpisz numer lub oznaczenie sali.", "Wyszukaj salę"],
+  class: ["KLASA", "Np. 4B, 2A…", "Wpisz symbol klasy, np. 4B.", "Wyszukaj klasę"]
+};
 const TEACHER_CODE_BY_SURNAME = {
   Adamczyk:{initial:"a",code:"AA"},
   Adamiak:{initial:"r",code:"XA"},
@@ -74,395 +83,533 @@ const TEACHER_CODE_BY_SURNAME = {
   Ziębacz:{initial:"s",code:"Zi"},
   Żalek:{initial:"a",code:"ŻA"}
 };
-const TEACHER_CODES = new Set(Object.values(TEACHER_CODE_BY_SURNAME).flatMap(entries=>(Array.isArray(entries)?entries:[entries]).map(entry=>normalize(entry.code))));
-const state = { mode: "teacher", view: "list", lessons: [], changes: [], meta: {} };
-const input = document.querySelector("#search-input");
-const results = document.querySelector("#results");
+const fieldFor = category => category === "teacher" ? "teacher" : category === "room" ? "room" : "class_name";
+const normalize = value => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const sortLessons = list => [...list].sort((a,b) => (a.day_index-b.day_index) || (a.lesson_number-b.lesson_number) || String(a.class_name).localeCompare(String(b.class_name), "pl"));
+const TEACHER_CODES = new Set(Object.values(TEACHER_CODE_BY_SURNAME).flatMap(entries => (Array.isArray(entries) ? entries : [entries]).map(entry => normalize(entry.code))));
 
-const labels = {
-  teacher: ["KOD NAUCZYCIELA","Np. Ga, Zi, WE…","Zastępstwa są wyświetlane jako kody z katalogu nauczycieli; niektórych kodów może brakować.","Wyszukaj nauczyciela"],
-  room: ["NUMER SALI","Np. 204, SG3, Aula…","Wpisz numer lub oznaczenie sali.","Wyszukaj salę"],
-  class: ["KLASA","Np. 4B, 2A…","Wpisz symbol klasy, np. 4B.","Wyszukaj klasę"]
-};
+function getTeacherCode(teacher) {
+  const value = String(teacher || "").trim();
+  if (!value) return "";
+  if (TEACHER_CODES.has(normalize(value))) return value;
+  if (/^[a-ząćęłńóśźż]{1,3}$/i.test(value)) return value;
+  const parts = value.replace(/^p\.\s*/i, "").split(/[\s.]+/).filter(Boolean);
+  const surname = normalize(parts[parts.length - 1] || "");
+  const entries = Object.entries(TEACHER_CODE_BY_SURNAME).find(([name]) => normalize(name) === surname)?.[1];
+  if (!entries) return "";
+  const options = Array.isArray(entries) ? entries : [entries];
+  const initial = parts.length > 1 ? normalize(parts[0]) : "";
+  const matchingOptions = initial ? options.filter(entry => normalize(entry.initial) === initial) : options;
+  return matchingOptions.length === 1 ? matchingOptions[0].code : "";
+}
 
-function normalize(value){return String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();}
-function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
-function setMode(mode){
-  state.mode=mode;
-  document.querySelectorAll(".tab").forEach(btn=>{
-    const active=btn.dataset.mode===mode;
-    btn.classList.toggle("active",active);btn.setAttribute("aria-selected",String(active));
+function setMode(mode) {
+  state.mode = mode;
+  document.querySelectorAll(".tab").forEach(btn => {
+    const active = btn.dataset.mode === mode;
+    btn.classList.toggle("active", active); btn.setAttribute("aria-selected", String(active));
   });
-  const [label,placeholder,hint,title]=labels[mode];
-  document.querySelector("#search-label").textContent=label;
-  input.placeholder=placeholder;document.querySelector("#search-hint").textContent=hint;
-  document.querySelector("#results-title").textContent=title;render();
+  const [label, placeholder, hint, title] = labels[mode];
+  document.querySelector("#search-label").textContent = label;
+  input.placeholder = placeholder; document.querySelector("#search-hint").textContent = hint;
+  document.querySelector("#results-title").textContent = title; renderSearch();
 }
-document.querySelectorAll(".tab").forEach(btn=>btn.addEventListener("click",()=>setMode(btn.dataset.mode)));
-document.querySelectorAll(".view-button").forEach(btn=>btn.addEventListener("click",()=>{
-  state.view=btn.dataset.view;
-  document.querySelectorAll(".view-button").forEach(button=>{
-    const active=button.dataset.view===state.view;
-    button.classList.toggle("active",active);
-    button.setAttribute("aria-pressed",String(active));
-  });
-  render();
-}));
-input.addEventListener("input",render);
-document.querySelector("#clear-btn").addEventListener("click",()=>{input.value="";input.focus();render();});
+document.querySelectorAll(".tab").forEach(btn => btn.addEventListener("click", () => setMode(btn.dataset.mode)));
+input.addEventListener("input", renderSearch);
+document.querySelector("#clear-btn").addEventListener("click", () => { input.value = ""; input.focus(); renderSearch(); });
 
-function render(){
-  const query=normalize(input.value);
-  if(!query){showEmpty("⌕","Wpisz kod, salę lub klasę","Wyniki pojawią się tutaj po wyszukaniu.");return;}
-  const field=state.mode==="teacher"?"teacher":state.mode==="room"?"room":"class_name";
-  const exactClassMatch=state.mode==="class"&&state.lessons.some(lesson=>normalize(lesson.class_name)===query);
-  const groupedMatches=getScheduleGroups().map(group=>({group,rows:getResultRows(group,query,field,exactClassMatch)}))
-    .filter(result=>result.rows.length)
-    .sort((a,b)=>(a.group.lesson.day_index-b.group.lesson.day_index)||(a.group.lesson.lesson_number-b.group.lesson.lesson_number)||a.group.lesson.class_name.localeCompare(b.group.lesson.class_name));
-  const matches=state.mode==="room"?mergeWholeClassRoomResults(groupedMatches):groupedMatches;
-  document.querySelector("#result-count").textContent=`${matches.length} ${plural(matches.length)}`;
-  if(!matches.length){showEmpty("⌕","Brak wyników",state.lessons.length?"Nie znaleziono pasujących lekcji. Sprawdź wpisaną frazę.":"Baza nie zawiera jeszcze pobranych planów. Uruchom importer zgodnie z instrukcją README.");return;}
-  results.classList.toggle("schedule-results",state.view==="table");
-  results.innerHTML=state.view==="table"
-    ?renderScheduleTable(matches)
-    :matches.flatMap(result=>result.rows.map(row=>renderLesson(row.lesson,row.change,row.status,row))).join("");
-}
-function getResultRows(group,query,field,exactClassMatch){
-  const rows=state.mode==="teacher"?getTeacherResultRows(group,query):visibleRows(group);
-  if(state.mode==="class"&&exactClassMatch){
-    return normalize(group.lesson.class_name)===query?rows:[];
-  }
-  const matching=rows.filter(row=>matchesQuery(row.lesson,field,query));
-  if(state.mode!=="room")return matching;
-  const roomRows=matching.filter(row=>row.status!=="normal"||!isRoomUsedByReplacement(row.lesson));
-  if(!group.change||group.change.action!=="replace")return roomRows;
-  return roomRows.map(row=>{
-    if(row.status==="replacement"){
-      return{...row,displayTooltip:getRoomOccupancyTooltip(row.lesson,group)};
-    }
-    if(row.status==="cancelled"&&group.change.new_room&&group.change.new_room!==group.lesson.room){
-      return{...row,displayTooltip:`Zajęcia przeniesiono do sali ${group.change.new_room}.`};
-    }
-    return row;
+document.querySelectorAll(".view-tab").forEach(btn => btn.addEventListener("click", () => setView(btn.dataset.view)));
+function setView(view) {
+  state.view = view;
+  document.querySelectorAll(".view-tab").forEach(btn => {
+    const active = btn.dataset.view === view;
+    btn.classList.toggle("active", active); btn.setAttribute("aria-pressed", String(active));
   });
+  document.querySelectorAll(".view-panel").forEach(panel => panel.hidden = panel.id !== `${view}-view`);
+  if (view === "day") renderDay();
+  if (view === "week") renderWeek();
 }
-function mergeWholeClassRoomResults(matches){
-  const merged=[];
-  const processed=new Set();
-  matches.forEach(result=>{
-    const change=result.group.change;
-    if(!change||change.action!=="replace"||String(change.group||"").trim()||!change.new_room){
-      merged.push(result);
-      return;
-    }
-    if(processed.has(change))return;
-    processed.add(change);
-    const affected=matches.filter(candidate=>candidate.group.change===change);
-    const replacement=affected.flatMap(candidate=>candidate.rows).find(row=>row.status==="replacement");
-    if(!replacement)return;
-    const previousGroups=[...new Set(state.lessons
-      .filter(lesson=>lesson.class_name===change.class_name
-        &&lesson.day_index===getDayIndex(change.date)
-        &&lesson.lesson_number===change.lesson_number
-        &&lesson.room===change.new_room
-        &&lesson.group)
-      .map(lesson=>lesson.group))];
-    const tooltip=previousGroups.length
-      ?`Zmiana z grupy ${previousGroups.join(", ")} na całą klasę.`
-      :"Zajęcia dla całej klasy.";
-    const lesson={...replacement.lesson,group:""};
-    const group={...affected[0].group,lesson:{...affected[0].group.lesson,group:""}};
-    merged.push({group,rows:[{...replacement,lesson,displayTooltip:tooltip,roomWholeClassChange:true}]});
-  });
-  return merged.sort((a,b)=>(a.group.lesson.day_index-b.group.lesson.day_index)
-    ||(a.group.lesson.lesson_number-b.group.lesson.lesson_number)
-    ||a.group.lesson.class_name.localeCompare(b.group.lesson.class_name));
-}
-function getTeacherResultRows(group,query){
-  if(group.change?.action==="replace"&&group.change.new_teacher&&!group.standalone){
-    const rows=[];
-    if(matchesQuery(group.lesson,"teacher",query)){
-      rows.push({lesson:group.lesson,change:group.change,status:"absent"});
-    }
-    const replacement=groupRows(group).find(row=>row.status==="replacement");
-    if(replacement&&matchesQuery(replacement.lesson,"teacher",query))rows.push(replacement);
-    return rows;
-  }
-  return visibleRows(group);
-}
-function isRoomUsedByReplacement(lesson){
-  const weekStart=getScheduleWeekStart();
-  const weekEnd=getScheduleWeekEnd(weekStart);
-  return state.changes.some(change=>change.action==="replace"
-    &&change.lesson_number===lesson.lesson_number
-    &&change.new_room===lesson.room
-    &&change.date>=weekStart
-    &&change.date<=weekEnd
-    &&getDayIndex(change.date)===lesson.day_index
-    &&change.class_name!==lesson.class_name);
-}
-function visibleRows(group){
-  const rows=groupRows(group);
-  if(state.mode==="class"&&group.change?.action==="replace"){
-    const replacement=rows.find(row=>row.status==="replacement");
-    if(replacement){
-      const tooltip=group.standalone
-      ? "Zastępstwo z ogłoszenia"
-        :`Planowo: ${describeLesson(group.lesson)}`;
-      return[{...replacement,status:"class-current",displayTooltip:tooltip}];
-    }
-  }
-  if(state.mode!=="teacher"||!group.change)return rows;
-  if(group.change.action==="cancel")return[];
-  if(group.change.action==="replace"){
-    const replacement=rows.find(row=>row.status==="replacement");
-    if(group.change.new_teacher&&!group.standalone)return[{lesson:group.lesson,change:group.change,status:"absent"}];
-    if(replacement)return[{...replacement,lesson:{...replacement.lesson,teacher:group.lesson.teacher}}];
-  }
-  return rows;
-}
-function matchesQuery(lesson,field,query){
-  if(field!=="teacher")return normalize(lesson[field]).includes(query);
-  return normalize(getTeacherCode(lesson.teacher)).includes(query);
-}
-function getTeacherCode(teacher){
-  const value=String(teacher||"").trim();
-  if(!value)return"";
-  const normalized=normalize(value);
-  if(TEACHER_CODES.has(normalized))return value;
-  if(/^[a-ząćęłńóśźż]{1,3}$/i.test(value))return value;
+["day-select", "day-category", "day-filter"].forEach(id => document.getElementById(id).addEventListener(id === "day-filter" ? "input" : "change", renderDay));
+["week-category", "week-filter"].forEach(id => document.getElementById(id).addEventListener(id === "week-filter" ? "input" : "change", renderWeek));
 
-  const parts=value.replace(/^p\.\s*/i,"").split(/[\s.]+/).filter(Boolean);
-  const surname=normalize(parts[parts.length-1]||"");
-  const entries=Object.entries(TEACHER_CODE_BY_SURNAME).find(([name])=>normalize(name)===surname)?.[1];
-  if(!entries)return"";
-  const options=Array.isArray(entries)?entries:[entries];
-  const initial=parts.length>1?normalize(parts[0]):"";
-  const matchingOptions=initial?options.filter(entry=>normalize(entry.initial)===initial):options;
-  return matchingOptions.length===1?matchingOptions[0].code:"";
+function renderLesson(row) {
+  const lesson = row.lesson || row;
+  const change = row.change;
+  const status = row.status || "normal";
+  const statusLabels = {
+    absent: "Nieobecny",
+    cancelled: "Odwołano",
+    replacement: change?.moved ? "Przeniesiono" : "Zastępstwo",
+    "class-current": "Jest teraz",
+    "room-current": "Jest teraz",
+  };
+  const teacher = getTeacherCode(lesson.teacher) || "Brak oznaczenia";
+  const date = change?.date ? ` · ${formatDate(change.date)}` : "";
+  const details = [lesson.class_name, lesson.group ? `grupa ${lesson.group}` : ""].filter(Boolean).join(" · ");
+  const tooltip = row.displayTooltip || changeDescription(row);
+  const notice = change?.display_notice && status === "cancelled" ? '<small class="change-note">Informacja z ogłoszenia</small>' : "";
+  const classes = ["lesson-card"];
+  if (status === "cancelled") classes.push("lesson-cancelled");
+  if (status === "replacement" || status === "class-current" || status === "room-current") classes.push("lesson-replacement");
+  if (row.roomWholeClassChange) classes.push("lesson-room-current");
+  return `<article class="${classes.join(" ")}"${tooltip ? ` title="${esc(tooltip)}"` : ""}>
+    <div class="lesson-time">${esc(lesson.time || "—")}<small>${esc(DAYS[lesson.day_index] || lesson.day || "")}${date}, lekcja ${esc(lesson.lesson_number)}</small></div>
+    <div class="lesson-main"><strong>${esc(lesson.subject || "Zajęcia")}</strong>${statusLabels[status] ? `<span class="changed-tag">${esc(statusLabels[status])}</span>` : ""}<p>${esc(teacher)} · ${esc(details)}</p>${notice}</div>
+    <div class="lesson-room">${esc(lesson.room || "Brak sali")}</div>
+  </article>`;
 }
-function getScheduleGroups(){
-  const groups=state.lessons.map(lesson=>({lesson,change:null}));
-  const weekStart=getScheduleWeekStart();
-  const weekEnd=getScheduleWeekEnd(weekStart);
-  state.changes.filter(change=>change.date>=weekStart&&change.date<=weekEnd&&change.lesson_number!==null&&change.lesson_number!==undefined)
-    .forEach(change=>{
-      const dayIndex=getDayIndex(change.date);
-      if(dayIndex<0)return;
-      const affected=groups.filter(group=>!group.change&&group.lesson.class_name===change.class_name&&group.lesson.day_index===dayIndex&&group.lesson.lesson_number===change.lesson_number&&groupMatches(group.lesson,change.group));
-      if(affected.length){
-        affected.forEach(group=>group.change=change);
-      }else if(change.action==="replace"){
-        const time=state.lessons.find(lesson=>lesson.lesson_number===change.lesson_number)?.time||"";
-        groups.push({lesson:{
-          class_name:change.class_name,day_index:dayIndex,lesson_number:change.lesson_number,
-          time,subject:change.new_subject||(change.moved?"Zajęcia przeniesione":"Zajęcia zastępcze"),
-          teacher:change.new_teacher||"",room:change.new_room||"",group:change.group||""
-        },change,standalone:true});
+function plural(n) { if (n===1) return "lekcja"; if (n%10>=2 && n%10<=4 && (n%100<12 || n%100>14)) return "lekcje"; return "lekcji"; }
+function empty(title, description) { return `<div class="empty-state"><div class="empty-icon">⌕</div><h3>${esc(title)}</h3><p>${esc(description)}</p></div>`; }
+function renderSearch() {
+  const query = normalize(input.value);
+  if (!query) { document.querySelector("#result-count").textContent = "—"; results.innerHTML = empty("Wpisz kod, salę lub klasę", "Wyniki pojawią się tutaj po wyszukaniu."); return; }
+  let matches = getScheduleGroups().flatMap(group => getRowsForGroup(group))
+    .filter(row => matchesQuery(row.lesson, query));
+  if (state.mode === "room") matches = mergeWholeClassRoomResults(matches);
+  matches.sort(compareRows);
+  document.querySelector("#result-count").textContent = `${matches.length} ${plural(matches.length)}`;
+  results.innerHTML = matches.length ? matches.map(renderLesson).join("") : empty("Brak wyników", state.lessons.length ? "Nie znaleziono pasujących lekcji. Sprawdź wpisaną frazę." : "Baza nie zawiera jeszcze pobranych planów. Uruchom importer zgodnie z README.");
+}
+
+function nextDateForDay(dayIndex) {
+  const start = new Date(`${getScheduleWeekStart()}T00:00:00Z`);
+  start.setUTCDate(start.getUTCDate() + dayIndex);
+  return start.toISOString().slice(0, 10);
+}
+
+function getScheduleWeekStart() {
+  const weekStart = state.meta.week_start || state.changesMeta.week_start;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(weekStart || "")) return weekStart;
+  const today = new Date(`${getWarsawDate()}T00:00:00Z`);
+  const day = today.getUTCDay();
+  today.setUTCDate(today.getUTCDate() - ((day + 6) % 7) + (day === 0 ? 7 : 0));
+  return today.toISOString().slice(0, 10);
+}
+
+function getWarsawDate() {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Warsaw", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function getDayIndex(date) {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return day >= 1 && day <= 5 ? day - 1 : -1;
+}
+
+function formatDate(date) {
+  const [year, month, day] = date.split("-");
+  return `${day}.${month}.${year}`;
+}
+
+function groupMatches(lesson, group) {
+  if (!group) return true;
+  const clean = value => normalize(value).replace(/^podzial\s*/, "");
+  const wanted = clean(group);
+  const existing = clean(lesson.group || "");
+  if (wanted === "1" || wanted === "2") return existing === wanted || existing === `${wanted}/2`;
+  return existing === wanted || normalize(lesson.subject).includes(wanted);
+}
+
+function normalizeChanges(messages) {
+  return messages.flatMap((message, index) => {
+    const rawText = message.original_text || message.raw_text || "";
+    if (message.action && Object.prototype.hasOwnProperty.call(message, "lesson_number")) {
+      return [{
+        ...message,
+        id: message.id || `${message.date}:${message.class_name}:${index}`,
+        group: message.group || "",
+        original_text: rawText,
+        raw_text: rawText,
+        lesson_numbers: message.lesson_number == null ? [] : [Number(message.lesson_number)],
+      }];
+    }
+
+    const lessonMatch = rawText.match(/\blekcja\s+((?:\d+\s*[,–-]\s*)*\d+)/i);
+    const lessonNumbers = [...new Set((message.lesson_numbers?.length
+      ? message.lesson_numbers
+      : lessonMatch ? lessonMatch[1].split(/[,\s–-]+/).filter(Boolean).map(Number) : [])
+      .map(Number).filter(Number.isInteger))];
+    const groupMatch = rawText.match(/\bgrupa\s+([\w/]+)/i);
+    const group = message.group || (groupMatch ? groupMatch[1] : "");
+    const movedMatch = rawText.match(/\bzajęcia\s+przeniesione\s+z\s+(.+)$/i);
+    const movedFrom = message.moved_from || (movedMatch ? movedMatch[1].trim() : null);
+    let details = movedMatch ? rawText.slice(0, movedMatch.index) : rawText;
+    details = details.replace(/^\s*Lekcja\s+((?:\d+\s*[,–-]\s*)*\d+)/i, "")
+      .replace(/\bgrupa\s+[\w/]+/i, "")
+      .replace(/\bcałość\b/i, "");
+    const teacherMatch = details.match(/\bp\.\s*(.+?)(?=\s+s\.|$)/i);
+    const roomMatch = details.match(/\bs\.\s*(.+)$/i);
+    const newTeacher = message.new_teacher || message.teacher || (teacherMatch ? teacherMatch[1].trim() : null);
+    const newRoom = message.new_room || message.room || (roomMatch ? roomMatch[1].trim() : null);
+    let subject = message.new_subject || details;
+    if (teacherMatch) subject = subject.replace(teacherMatch[0], "");
+    if (roomMatch) subject = subject.replace(roomMatch[0], "");
+    subject = subject.replace(/^\s*[–—-]\s*/, "").replace(/^zastępstwo\b\s*/i, "").replace(/^[ \t–—:;-]+|[ \t–—:;-]+$/g, "");
+    const isCancelled = /\b(?:odwołan\w*|nie\s+ma\s+zajęć|brak\s+zajęć)\b/i.test(rawText);
+    const action = message.action || (lessonNumbers.length
+      ? isCancelled ? "cancel" : (subject || newTeacher || newRoom || movedFrom ? "replace" : "note")
+      : "note");
+    const base = {
+      ...message,
+      class_name: message.class_name || "",
+      group,
+      action,
+      new_subject: message.new_subject || subject || null,
+      new_teacher: newTeacher,
+      new_room: newRoom,
+      moved: Boolean(message.moved || movedFrom),
+      moved_from: movedFrom,
+      original_text: rawText,
+      raw_text: rawText,
+      display_notice: Boolean(message.display_notice),
+    };
+    const numbers = lessonNumbers.length ? lessonNumbers : [null];
+    return numbers.map((lessonNumber, part) => ({
+      ...base,
+      id: `${message.id || `${message.date}:${message.class_name}:${index}`}:${part + 1}`,
+      lesson_number: lessonNumber,
+      lesson_numbers: lessonNumber == null ? [] : [lessonNumber],
+      scope: lessonNumber == null ? (base.class_name ? "class" : "general") : "lesson",
+    }));
+  });
+}
+
+function getScheduleGroups(dateFilter) {
+  const groups = state.lessons.map(lesson => ({ lesson, change: null }));
+  const weekStart = getScheduleWeekStart();
+  const weekEndDate = new Date(`${weekStart}T00:00:00Z`);
+  weekEndDate.setUTCDate(weekEndDate.getUTCDate() + 4);
+  const weekEnd = weekEndDate.toISOString().slice(0, 10);
+  state.changes
+    .filter(change => change.action !== "note"
+      && change.date >= weekStart
+      && change.date <= weekEnd
+      && (!dateFilter || change.date === dateFilter))
+    .forEach(change => {
+      const dayIndex = getDayIndex(change.date);
+      if (dayIndex < 0 || change.lesson_number === null || change.lesson_number === undefined) return;
+      const affected = groups.filter(group => !group.change
+        && normalize(group.lesson.class_name) === normalize(change.class_name)
+        && Number(group.lesson.day_index) === dayIndex
+        && Number(group.lesson.lesson_number) === Number(change.lesson_number)
+        && groupMatches(group.lesson, change.group));
+      if (affected.length) {
+        affected.forEach(group => { group.change = change; });
+      } else if (change.action === "replace") {
+        const time = state.lessons.find(lesson => Number(lesson.lesson_number) === Number(change.lesson_number))?.time || "";
+        const lesson = {
+            class_name: change.class_name,
+            day_index: dayIndex,
+            lesson_number: Number(change.lesson_number),
+            time,
+            subject: "",
+            teacher: "",
+            room: "",
+            group: change.group || "",
+          };
+        groups.push({
+          lesson: getChangedLesson(change, lesson),
+          change,
+          standalone: true,
+        });
       }
     });
   return groups;
 }
-function getScheduleWeekStart(){
-  if(/^\d{4}-\d{2}-\d{2}$/.test(state.meta.week_start||""))return state.meta.week_start;
-  const current=new Date(`${getWarsawDate()}T00:00:00Z`);
-  const day=current.getUTCDay();
-  current.setUTCDate(current.getUTCDate()-((day+6)%7)+(day===0?7:0));
-  return current.toISOString().slice(0,10);
-}
-function getScheduleWeekEnd(weekStart){
-  const end=new Date(`${weekStart}T00:00:00Z`);
-  end.setUTCDate(end.getUTCDate()+4);
-  return end.toISOString().slice(0,10);
-}
-function groupMatches(lesson,group){
-  if(!group)return true;
-  const normalizeGroup=value=>normalize(value).replace(/^podzial\s*/, "");
-  const wanted=normalizeGroup(group);
-  const existing=normalizeGroup(lesson.group||"");
-  if(wanted==="1"||wanted==="2")return existing===wanted||existing===`${wanted}/2`;
-  return existing===wanted||normalize(lesson.subject).includes(wanted);
-}
-function groupRows(group){
-  if(!group.change)return[{lesson:group.lesson,change:null,status:"normal"}];
-  if(group.change.action==="cancel")return[{lesson:group.lesson,change:group.change,status:"cancelled"}];
-  if(group.change.action!=="replace")return[{lesson:group.lesson,change:null,status:"normal"}];
-  if(group.standalone)return[{lesson:{...group.lesson,subject:getReplacementSubject(group)},change:group.change,status:"replacement"}];
-  return[
-    {lesson:group.lesson,change:group.change,status:"cancelled"},
-    {lesson:{...group.lesson,subject:getReplacementSubject(group),teacher:group.change.new_teacher||group.lesson.teacher,room:group.change.new_room||group.lesson.room},change:group.change,status:"replacement"}
+
+function groupRows(group) {
+  if (!group.change) return [{ group, lesson: group.lesson, change: null, status: "normal" }];
+  if (group.change.action === "cancel") return [{ group, lesson: group.lesson, change: group.change, status: "cancelled" }];
+  if (group.change.action !== "replace") return [{ group, lesson: group.lesson, change: null, status: "normal" }];
+  if (group.standalone) {
+    return [{ group, lesson: getChangedLesson(group.change, group.lesson), change: group.change, status: "replacement" }];
+  }
+  return [
+    { group, lesson: group.lesson, change: group.change, status: "cancelled" },
+    {
+      group,
+      lesson: getChangedLesson(group.change, group.lesson),
+      change: group.change,
+      status: "replacement",
+    },
   ];
 }
-function getReplacementSubject(group){
-  if(group.change.new_subject)return group.change.new_subject;
-  const sourceLessonNumber=Number(String(group.change.moved_from||"").match(/\d+/)?.[0]);
-  if(!sourceLessonNumber)return group.lesson.subject;
-  const sourceLessons=state.lessons.filter(lesson=>lesson.class_name===group.lesson.class_name
-    &&lesson.day_index===getDayIndex(group.change.date)
-    &&lesson.lesson_number===sourceLessonNumber);
-  const sourceLesson=sourceLessons.find(lesson=>lesson.group===group.lesson.group)
-    ||(group.change.group?sourceLessons.find(lesson=>groupMatches(lesson,group.change.group)):null)
-    ||sourceLessons[0];
-  return sourceLesson?.subject||group.lesson.subject;
+
+function getRowsForGroup(group, mode = state.mode) {
+  const rows = groupRows(group);
+  if (mode === "teacher" && group.change?.action === "replace") {
+    const replacement = rows.find(row => row.status === "replacement");
+    if (!replacement || group.standalone) return replacement ? [replacement] : rows;
+    if (!group.change.new_teacher || normalize(getTeacherCode(group.lesson.teacher)) === normalize(getTeacherCode(replacement.lesson.teacher))) {
+      return [replacement];
+    }
+    return [{ ...rows.find(row => row.status === "cancelled"), status: "absent" }, replacement];
+  }
+  if (mode === "room" && group.change?.action === "replace"
+    && group.change.new_room && group.change.new_room === group.lesson.room) {
+    return rows.filter(row => row.status !== "cancelled");
+  }
+  return rows;
 }
-function renderScheduleTable(resultsToRender){
-  const rows=new Map();
-  resultsToRender.forEach(({group,rows:matchingRows})=>{
-    matchingRows.forEach(row=>{
-      getScheduleEntries(group,row).forEach(entry=>{
-      const lesson=entry.lesson;
-      const key=`${lesson.lesson_number}|${lesson.time||""}`;
-      if(!rows.has(key))rows.set(key,{lessonNumber:lesson.lesson_number,time:lesson.time||"",days:Array.from({length:5},()=>[])});
-      rows.get(key).days[lesson.day_index].push(entry);
-      });
+
+function getReplacementSubject(group) {
+  return getChangedLesson(group.change, group.lesson).subject;
+}
+
+function getChangedLesson(change, lesson) {
+  const source = getMoveSourceLesson(change, lesson);
+  return {
+    ...lesson,
+    subject: change.new_subject || (change.moved && source?.subject) || lesson.subject,
+    teacher: getChangeTeacher(change, source) || lesson.teacher,
+    room: getChangeRoom(change, source) || lesson.room,
+  };
+}
+
+function getMoveSourceLesson(change, lesson) {
+  const sourceMatch = String(change.moved_from || "").match(/\blekcj(?:a|ę|i)?\s*(\d+)/i);
+  if (!sourceMatch) return null;
+  const sourceLessonNumber = Number(sourceMatch[1]);
+  const sourceLessons = state.lessons.filter(item => normalize(item.class_name) === normalize(lesson.class_name || change.class_name)
+    && Number(item.day_index) === getDayIndex(change.date)
+    && Number(item.lesson_number) === sourceLessonNumber);
+  return sourceLessons.find(item => item.group === lesson.group)
+    || (change.group ? sourceLessons.find(item => groupMatches(item, change.group)) : null)
+    || sourceLessons[0]
+    || null;
+}
+
+function getChangeSubject(change) {
+  if (change.new_subject) return change.new_subject;
+  const source = getMoveSourceLesson(change, {
+    class_name: change.class_name,
+    group: change.group || "",
+  });
+  return change.moved && source ? source.subject : "";
+}
+
+function getChangeTeacher(change, source = getMoveSourceLesson(change, { class_name: change.class_name, group: change.group || "" })) {
+  return change.new_teacher || (change.moved && source?.teacher) || change.teacher || "";
+}
+
+function getChangeRoom(change, source = getMoveSourceLesson(change, { class_name: change.class_name, group: change.group || "" })) {
+  return change.new_room || (change.moved && source?.room) || change.room || "";
+}
+
+function matchesQuery(lesson, query, mode = state.mode) {
+  if (mode === "teacher") return normalize(getTeacherCode(lesson.teacher)).includes(query);
+  return normalize(lesson[fieldFor(mode)]).includes(query);
+}
+
+function compareRows(a, b) {
+  return Number(a.lesson.day_index) - Number(b.lesson.day_index)
+    || Number(a.lesson.lesson_number) - Number(b.lesson.lesson_number)
+    || String(a.lesson.class_name).localeCompare(String(b.lesson.class_name), "pl");
+}
+
+function mergeWholeClassRoomResults(rows, mode = state.mode) {
+  if (mode !== "room") return rows;
+  const merged = [];
+  const processed = new Set();
+  rows.forEach(row => {
+    const change = row.change;
+    if (!change || change.action !== "replace" || String(change.group || "").trim() || !change.new_room || row.status !== "replacement") {
+      merged.push(row);
+      return;
+    }
+    if (processed.has(change)) return;
+    processed.add(change);
+    const replacement = rows.find(candidate => candidate.change === change && candidate.status === "replacement");
+    if (!replacement) return;
+    const previousGroups = [...new Set(state.lessons
+      .filter(lesson => normalize(lesson.class_name) === normalize(change.class_name)
+        && Number(lesson.day_index) === getDayIndex(change.date)
+        && Number(lesson.lesson_number) === Number(change.lesson_number)
+        && lesson.room === change.new_room
+        && lesson.group)
+      .map(lesson => lesson.group))];
+    merged.push({
+      ...replacement,
+      group: { ...replacement.group, lesson: { ...replacement.group.lesson, group: "" } },
+      lesson: { ...replacement.lesson, group: "" },
+      displayTooltip: previousGroups.length
+        ? `Zmiana z grupy ${previousGroups.join(", ")} na całą klasę.`
+        : "Zajęcia dla całej klasy.",
+      roomWholeClassChange: true,
+      status: "room-current",
     });
   });
-  const sortedRows=[...rows.values()].sort((a,b)=>a.lessonNumber-b.lessonNumber||a.time.localeCompare(b.time));
-  return`<p class="schedule-scroll-hint">Przesuń tabelę w bok, aby zobaczyć pozostałe dni.</p><div class="schedule-table-wrap"><table class="schedule-table">
-    <thead><tr><th scope="col">Lekcja / godzina</th>${DAYS.map(day=>`<th scope="col">${escapeHtml(day)}</th>`).join("")}</tr></thead>
-    <tbody>${sortedRows.map(row=>`<tr><th scope="row"><span>Lekcja ${escapeHtml(row.lessonNumber)}</span><small>${escapeHtml(row.time||"—")}</small></th>${row.days.map(entries=>`<td>${entries.map(renderScheduleEntry).join("")||"—"}</td>`).join("")}</tr>`).join("")}</tbody>
-  </table></div>`;
+  return merged.sort(compareRows);
 }
-function getScheduleEntries(group,row){
-  const lesson=row.lesson;
-  if(state.mode==="class"){
-    const planned=lesson;
-    if(!group.change)return[{lesson:planned,status:"normal",tooltip:""}];
-    if(group.change.action==="replace"){
-      if(row.status==="class-current"){
-        const tooltip=group.standalone
-          ? "Zastępstwo z ogłoszenia"
-          :`Planowo: ${describeLesson(group.lesson)}`;
-        return[{lesson,status:"class-current",change:group.change,tooltip}];
-      }
-      if(group.standalone)return[{lesson:planned,status:"class-current",change:group.change,tooltip:"Zastępstwo z ogłoszenia"}];
-      const replacement=groupRows(group).find(row=>row.status==="replacement");
-      return[{lesson:planned,status:"planned-changed",change:group.change,tooltip:replacement?`Teraz: ${describeLesson(replacement.lesson)}`:"Lekcja zmieniona"}];
-    }
-    if(group.change.action==="cancel"){
-      const notice=group.change.display_notice?"Informacja z ogłoszenia":"Lekcja odwołana";
-      return[{lesson:planned,status:"cancelled",change:group.change,tooltip:notice}];
-    }
-    return[{lesson:planned,status:"normal",tooltip:""}];
-  }
-  if(state.mode==="teacher"){
-    const replacement=row.status==="replacement"&&row.change?.new_teacher;
-    return [{
-      lesson:row.lesson,
-      status:row.status==="absent"?"absent":replacement?"replacement":"normal",
-      tooltip:row.status==="absent"?"Nieobecny":replacement?"Zastępstwo":row.change?.new_room&&row.change.new_room!==group.lesson.room?`Nowa sala: ${row.change.new_room}`:"",
-    }];
-  }
 
-  if(!group.change)return[{lesson,status:"normal",tooltip:""}];
-  if(group.change.action==="cancel"){
-    return[{lesson,status:"cancelled",change:group.change,tooltip:group.change.display_notice?"Informacja z ogłoszenia":"Lekcja odwołana"}];
-  }
-  if(group.change.action!=="replace")return[{lesson,status:"normal",tooltip:""}];
+function getResultRows(category, value, dateFilter) {
+  const dayIndex = dateFilter ? getDayIndex(dateFilter) : null;
+  let rows = getScheduleGroups(dateFilter)
+    .filter(group => dayIndex === null || Number(group.lesson.day_index) === dayIndex)
+    .flatMap(group => getRowsForGroup(group, category))
+    .filter(row => !value || matchesQuery(row.lesson, normalize(value), category));
+  if (category === "room") rows = mergeWholeClassRoomResults(rows, category);
+  return rows.sort(compareRows);
+}
 
-  if(row.status==="replacement"){
-    const tooltip=row.displayTooltip||getRoomOccupancyTooltip(lesson,group);
-    return[{lesson,status:"room-current",change:group.change,tooltip}];
+function changeDescription(row) {
+  const change = row.change;
+  if (!change) return "";
+  if (row.status === "cancelled" || change.action === "cancel") return change.display_notice ? "Informacja z ogłoszenia." : "Lekcja odwołana.";
+  if (change.action === "replace") {
+    const teacher = getTeacherCode(getChangeTeacher(change, row.lesson));
+    const room = getChangeRoom(change, row.lesson);
+    const details = [getReplacementSubject(row.group), teacher && `p. ${teacher}`, room && `s. ${room}`].filter(Boolean);
+    return `${change.moved ? "Przeniesienie" : "Zastępstwo"}: ${details.join(" · ")}`;
   }
-  if(row.status==="cancelled"&&group.change.new_room&&group.change.new_room!==group.lesson.room){
-    return[{lesson,status:"moved-out",change:group.change,tooltip:row.displayTooltip||`Zajęcia przeniesiono do sali ${group.change.new_room}.`}];
+  return "Informacja z ogłoszenia.";
+}
+
+function messageMatches(message, category, value) {
+  if (!value) return true;
+  return matchesQuery({
+    class_name: message.class_name,
+    teacher: message.new_teacher || message.teacher,
+    room: message.new_room || message.room,
+  }, normalize(value), category);
+}
+
+function messagesFor(date, category, value) {
+  return state.changes.filter(message => (!date || message.date === date) && messageMatches(message, category, value));
+}
+
+function uniqueNotices(messages) {
+  const unique = new Map();
+  messages.forEach(message => {
+    const text = message.original_text || message.raw_text || "";
+    const key = `${message.date}|${message.class_name}|${message.group}|${message.action}|${text}`;
+    if (!unique.has(key)) unique.set(key, { ...message, lesson_numbers: [] });
+    const notice = unique.get(key);
+    if (message.lesson_number != null) notice.lesson_numbers.push(Number(message.lesson_number));
+  });
+  return [...unique.values()].map(notice => ({
+    ...notice,
+    lesson_numbers: [...new Set(notice.lesson_numbers)].sort((a, b) => a - b),
+  }));
+}
+
+function noticeText(message) {
+  if (message.action === "replace") {
+    const subject = getChangeSubject(message);
+    const teacher = getTeacherCode(getChangeTeacher(message));
+    const room = getChangeRoom(message);
+    const details = [subject, teacher && `p. ${teacher}`, room && `s. ${room}`].filter(Boolean);
+    return `${message.moved ? "Przeniesienie" : "Zastępstwo"}${details.length ? `: ${details.join(" · ")}` : ""}`;
   }
-  return[{lesson,status:row.status,change:group.change,tooltip:row.displayTooltip||""}];
+  if (message.action === "cancel") return "Lekcja odwołana.";
+  return "Informacja z ogłoszenia.";
 }
-function getRoomOccupancyTooltip(replacement,group){
-  const currentTeacher=getTeacherCode(replacement.teacher)||"zastępstwo";
-  const room=replacement.room||"";
-  const occupants=state.lessons.filter(lesson=>lesson.day_index===replacement.day_index
-    &&lesson.lesson_number===replacement.lesson_number
-    &&lesson.room===room
-    &&(group.lesson.room===room
-      ||lesson.class_name!==group.lesson.class_name
-      ||lesson.group!==group.lesson.group
-      ||lesson.teacher!==group.lesson.teacher));
-  const previousTeachers=[...new Set(occupants.map(lesson=>getTeacherCode(lesson.teacher)).filter(Boolean))];
-  if(previousTeachers.length){
-    return`Zamiast ${previousTeachers.join(", ")} jest ${currentTeacher||"zastępstwo"}.`;
+
+function noticeMarkup(messages, date, heading = "KOMUNIKATY O ZMIANACH") {
+  const notices = uniqueNotices(messages);
+  const dateLabel = /^\d{4}-\d{2}-\d{2}$/.test(date) ? formatDate(date) : date;
+  if (!notices.length) return `<div class="notice-empty">Brak opublikowanych komunikatów o zmianach dla ${esc(dateLabel)}.</div>`;
+  const weekView = heading === "KOMUNIKATY DOTYCZĄCE WYBRANEGO ELEMENTU";
+  return `<div class="notice-heading"><span class="notice-dot"></span> ${heading} · ${esc(dateLabel)}</div>` + notices.map(message => {
+    const lessonNumbers = message.lesson_numbers?.length ? ` · lekcja${message.lesson_numbers.length > 1 ? "e" : ""} ${message.lesson_numbers.map(esc).join(", ")}` : "";
+    const group = message.group ? ` · grupa ${esc(message.group)}` : "";
+    const noticeDate = weekView && message.date ? `${formatDate(message.date)} · ` : "";
+    return `<article class="notice-card"><div class="notice-meta">${esc(noticeDate)}${esc(message.class_name || "Informacja ogólna")}${lessonNumbers}${group}</div><p>${esc(noticeText(message))}</p></article>`;
+  }).join("");
+}
+
+function hasLessonChange(lesson, date = nextDateForDay(lesson.day_index)) {
+  return state.changes.some(change => change.date === date
+    && normalize(change.class_name) === normalize(lesson.class_name)
+    && Number(change.lesson_number) === Number(lesson.lesson_number)
+    && groupMatches(lesson, change.group)
+    && change.action !== "note");
+}
+
+function renderDay() {
+  const day = Number(document.querySelector("#day-select").value);
+  const category = document.querySelector("#day-category").value;
+  const value = document.querySelector("#day-filter").value;
+  const date = nextDateForDay(day);
+  const rows = getResultRows(category, value, date);
+  document.querySelector("#day-count").textContent = `${rows.length} ${plural(rows.length)}`;
+  document.querySelector("#day-changes").innerHTML = noticeMarkup(messagesFor(date, category, value), date);
+  document.querySelector("#day-results").innerHTML = rows.length ? rows.map(renderLesson).join("") : empty("Brak lekcji", value ? "Nie znaleziono zajęć dla wybranego elementu w tym dniu." : "Brak danych dla wybranego dnia.");
+}
+
+function renderWeekLesson(row) {
+  const lesson = row.lesson;
+  const status = row.status || "normal";
+  const className = status === "cancelled" ? " week-lesson-cancelled"
+    : status === "replacement" || status === "absent" || status === "room-current" ? " week-lesson-changed" : "";
+  const label = status === "cancelled" ? "Odwołano"
+    : status === "absent" ? "Nieobecny"
+      : status === "replacement" ? row.change?.moved ? "Przeniesiono" : "Zastępstwo"
+        : status === "room-current" ? "Jest teraz" : "";
+  const details = [
+    getTeacherCode(lesson.teacher) || "—",
+    lesson.room || "—",
+    lesson.class_name,
+    lesson.group && `gr. ${lesson.group}`,
+  ].filter(Boolean).join(" · ");
+  return `<div class="week-lesson${className}"${row.displayTooltip ? ` title="${esc(row.displayTooltip)}"` : ""}><strong>${esc(lesson.time || "—")}</strong><span>${esc(lesson.subject || "Zajęcia")}</span><small>${esc(details)}</small>${label ? `<em>${esc(label)}</em>` : ""}</div>`;
+}
+
+function renderWeek() {
+  const category = document.querySelector("#week-category").value;
+  const value = document.querySelector("#week-filter").value;
+  if (!value.trim()) {
+    document.querySelector("#week-count").textContent = "—";
+    document.querySelector("#week-results").innerHTML = empty("Wybierz element planu", "Wpisz klasę, kod nauczyciela lub salę, aby wyświetlić tabelę tygodniową.");
+    document.querySelector("#week-changes").innerHTML = "";
+    return;
   }
-  return`Sala ${room} była wolna. Teraz jest ${currentTeacher||"zastępstwo"}.`;
+  const days = DAYS.map((_, index) => getResultRows(category, value, nextDateForDay(index)));
+  const rows = days.flat();
+  document.querySelector("#week-count").textContent = `${rows.length} ${plural(rows.length)}`;
+  if (!rows.length) {
+    document.querySelector("#week-results").innerHTML = empty("Brak wyników", "Nie znaleziono planu dla podanego elementu.");
+    document.querySelector("#week-changes").innerHTML = ""; return;
+  }
+  const numbers = [...new Set(rows.map(row => Number(row.lesson.lesson_number)))].sort((a,b)=>a-b);
+  const cells = numbers.map(number => `<tr><th class="period-cell">${number}</th>${days.map(dayRows => {
+    const entries = dayRows.filter(row => Number(row.lesson.lesson_number) === number);
+    return `<td>${entries.map(renderWeekLesson).join("") || '<span class="cell-empty">—</span>'}</td>`;
+  }).join("")}</tr>`).join("");
+  document.querySelector("#week-results").innerHTML = `<table class="week-table"><thead><tr><th>Lekcja</th>${DAYS.map(day => `<th>${day}</th>`).join("")}</tr></thead><tbody>${cells}</tbody></table>`;
+  const notices = DAYS.flatMap((_, index) => messagesFor(nextDateForDay(index), category, value));
+  const weekRange = `${formatDate(nextDateForDay(0))} – ${formatDate(nextDateForDay(4))}`;
+  document.querySelector("#week-changes").innerHTML = noticeMarkup(notices, weekRange, "KOMUNIKATY DOTYCZĄCE WYBRANEGO ELEMENTU");
 }
-function describeLesson(lesson){
-  return[lesson.subject,getTeacherCode(lesson.teacher),lesson.room?`sala ${lesson.room}`:""].filter(Boolean).join(" · ")||"Zajęcia";
+
+async function loadJson(url) {
+  const response = await fetch(`${url}?v=${Date.now()}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Nie udało się pobrać ${url}`);
+  return response.json();
 }
-function renderScheduleEntry(entry){
-  const lesson=entry.lesson;
-  const teacher=getTeacherCode(lesson.teacher);
-  const title=state.mode==="teacher"
-    ?teacher||lesson.class_name
-    :state.mode==="room"
-      ?teacher||"Zajęcia"
-      :lesson.subject||"Zajęcia";
-  const details=state.mode==="teacher"
-    ?[lesson.class_name,lesson.group?`grupa ${lesson.group}`:"",lesson.room?`sala ${lesson.room}`:""].filter(Boolean).join(" · ")
-    :state.mode==="room"
-      ?[lesson.class_name,lesson.subject,lesson.group?`grupa ${lesson.group}`:""].filter(Boolean).join(" · ")
-      :[lesson.class_name,teacher,lesson.room?`sala ${lesson.room}`:"",lesson.group?`grupa ${lesson.group}`:""].filter(Boolean).join(" · ");
-  const tooltip=entry.tooltip||describeLesson(lesson);
-  const notice=entry.change?.display_notice&&entry.status==="cancelled"?'<small class="schedule-notice">Informacja z ogłoszenia</small>':"";
-  const badge=state.mode==="room"&&entry.status==="room-current"?"Teraz":state.mode==="teacher"&&entry.status==="replacement"?"Zastępstwo":"";
-  return`<div class="schedule-entry schedule-${escapeHtml(entry.status)}" tabindex="0" title="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}">
-    <span class="schedule-entry-title">${escapeHtml(title)}</span>${details?`<span class="schedule-entry-details">${escapeHtml(details)}</span>`:""}${badge?`<span class="schedule-entry-badge">${escapeHtml(badge)}</span>`:""}${notice}
-  </div>`;
-}
-function renderLesson(lesson,change,status,row){
-  const day=DAYS[lesson.day_index]||lesson.day||"";
-  const date=change?.date?` · ${escapeHtml(formatDate(change.date))}`:"";
-  const badge=state.mode==="room"&&change?.action==="replace"
-    ?status==="cancelled"?"Planowo":status==="replacement"?"Jest teraz":""
-    :state.mode==="class"&&status==="class-current"?"Jest teraz"
-    :state.mode==="teacher"&&status==="absent"?"Nieobecny"
-    :status==="cancelled"?"Odwołano":status==="replacement"?(change.moved?"Przeniesiono":"Zastępstwo"):"";
-  const roomNote=state.mode==="room"&&row?.displayTooltip?`<p class="change-note">${escapeHtml(row.displayTooltip)}</p>`:"";
-  const notice=status==="cancelled"&&change?.display_notice?'<p class="change-note">Informacja z ogłoszenia</p>':"";
-  const note=roomNote||notice;
-  const subject=state.mode==="teacher"&&(status==="replacement"||status==="absent")?"":`<strong>${escapeHtml(lesson.subject||"Zajęcia")}</strong>`;
-  const teacher=getTeacherCode(lesson.teacher)||"Brak oznaczenia";
-  return`<article class="lesson-card${status==="cancelled"?" lesson-cancelled":""}${status==="replacement"?" lesson-replacement":""}${status==="class-current"?" lesson-class-current":""}${row?.roomWholeClassChange?" lesson-room-current":""}"${row?.displayTooltip?` title="${escapeHtml(row.displayTooltip)}"`:""}>
-      <div class="lesson-time">${escapeHtml(lesson.time||"—")}<small>${escapeHtml(day)}${date}, lekcja ${escapeHtml(lesson.lesson_number)}</small></div>
-      <div class="lesson-main">${subject}${badge?`<span class="change-badge${status==="absent"?" absence-badge":""}">${escapeHtml(badge)}</span>`:""}<p>${escapeHtml(teacher)} · ${escapeHtml(lesson.class_name)}${lesson.group?` · grupa ${escapeHtml(lesson.group)}`:""}</p>${note}</div>
-      <div class="lesson-room">${escapeHtml(lesson.room||"Brak sali")}</div>
-    </article>`;
-}
-function getWarsawDate(){
-  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Warsaw",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
-  const values=Object.fromEntries(parts.map(part=>[part.type,part.value]));
-  return`${values.year}-${values.month}-${values.day}`;
-}
-function getDayIndex(date){
-  const day=new Date(`${date}T00:00:00Z`).getUTCDay();
-  return day>=1&&day<=5?day-1:-1;
-}
-function formatDate(date){
-  const [year,month,day]=date.split("-");
-  return`${day}.${month}.${year}`;
-}
-function plural(n){if(n===1)return"lekcja";if(n%10>=2&&n%10<=4&&(n%100<12||n%100>14))return"lekcje";return"lekcji";}
-function showEmpty(icon,title,description){
-  results.classList.remove("schedule-results");
-  document.querySelector("#result-count").textContent="—";
-  results.innerHTML=`<div class="empty-state"><div class="empty-icon">${icon}</div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p></div>`;
-}
-async function loadData(){
-  try{
-    const response=await fetch(`${DATA_URL}?v=${Date.now()}`,{cache:"no-store"});
-    if(!response.ok)throw new Error("Nie udało się pobrać bazy");
-    const data=await response.json();
-    state.lessons=Array.isArray(data.lessons)?data.lessons:[];
-    state.changes=Array.isArray(data.changes)?data.changes:[];
-    state.meta=data.meta||{};
-    const updatedAt=new Date(state.meta.updated_at||"");
-    const timestamp=Number.isNaN(updatedAt.getTime())
-      ?"brak informacji"
-      :new Intl.DateTimeFormat("pl-PL",{timeZone:"Europe/Warsaw",dateStyle:"short",timeStyle:"short"}).format(updatedAt);
-    document.querySelector("#sync-label").textContent=`Ostatnia synchronizacja: ${timestamp}`;
-    render();
-  }catch(error){
-    document.querySelector("#sync-label").textContent="Nie udało się wczytać danych";
-    showEmpty("!","Nie można wczytać bazy","Sprawdź, czy aplikacja została opublikowana razem z folderem data.");
+async function loadData() {
+  try {
+    const [plans, changes] = await Promise.allSettled([loadJson(DATA_URL), loadJson(CHANGES_URL)]);
+    if (plans.status === "fulfilled") {
+      state.lessons = Array.isArray(plans.value.lessons) ? plans.value.lessons : [];
+      state.meta = plans.value.meta || {};
+    } else throw plans.reason;
+    const rawChanges = changes.status === "fulfilled"
+      ? Array.isArray(changes.value.messages) ? changes.value.messages : (plans.value.changes || [])
+      : (plans.value.changes || []);
+    state.changes = normalizeChanges(rawChanges);
+    state.changesMeta = changes.status === "fulfilled" ? changes.value.meta || {} : state.meta;
+    const planStamp = state.meta.updated_at ? new Date(state.meta.updated_at).toLocaleString("pl-PL") : "brak synchronizacji";
+    const changeStamp = changes.status === "fulfilled"
+      ? (state.changesMeta.updated_at ? new Date(state.changesMeta.updated_at).toLocaleString("pl-PL") : "brak zmian")
+      : "zmiany niedostępne";
+    document.querySelector("#sync-label").textContent = state.lessons.length ? `Plan: ${planStamp} · zmiany: ${changeStamp}` : "Oczekiwanie na pierwszą synchronizację planu";
+    renderSearch(); renderDay(); renderWeek();
+  } catch (error) {
+    document.querySelector("#sync-label").textContent = "Nie udało się wczytać planu";
+    results.innerHTML = empty("Nie można wczytać bazy", "Sprawdź, czy aplikacja została opublikowana razem z folderem data.");
   }
 }
 loadData();
