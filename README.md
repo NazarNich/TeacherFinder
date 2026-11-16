@@ -5,7 +5,7 @@ Wyszukiwarka planowych zajęć nauczycieli, sal i klas na podstawie publicznie o
 ## Funkcje
 
 - wyszukiwanie po kodzie nauczyciela, sali i oddziale;
-- widok wyników z dniem, numerem lekcji, godziną, przedmiotem, salą i klasą;
+- widok wyników z dniem, numerem lekcji, godziną, przedmiotem, salą, klasą i grupą (jeśli dotyczy);
 - automatyczne wykrywanie oddziałów.
 - pobieranie zmian z [oficjalnej strony ZS1](https://www.zs-1.edu.pl/index.php/plan-lekcji/zmiany-do-planu);
 - wyświetlanie zastępstw i odwołań tylko w dniu wskazanym w zmianie, bez modyfikowania oryginalnych lekcji.

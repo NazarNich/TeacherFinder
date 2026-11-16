@@ -352,7 +352,7 @@ function renderScheduleEntry(entry){
       ?`${teacher||"Zajęcia"} · ${lesson.class_name}`
       :lesson.subject||"Zajęcia";
   const details=state.mode==="teacher"
-    ?[lesson.class_name,lesson.room?`sala ${lesson.room}`:""].filter(Boolean).join(" · ")
+    ?[lesson.class_name,lesson.group?`grupa ${lesson.group}`:"",lesson.room?`sala ${lesson.room}`:""].filter(Boolean).join(" · ")
     :state.mode==="room"
       ?[lesson.subject,lesson.group?`grupa ${lesson.group}`:""].filter(Boolean).join(" · ")
       :[lesson.class_name,teacher,lesson.room?`sala ${lesson.room}`:"",lesson.group?`grupa ${lesson.group}`:""].filter(Boolean).join(" · ");
