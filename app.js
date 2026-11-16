@@ -145,11 +145,14 @@ function getResultRows(group,query,field,exactClassMatch){
   });
 }
 function isRoomUsedByReplacement(lesson){
-  const date=getWarsawDate();
-  return state.changes.some(change=>change.date===date
-    &&change.action==="replace"
+  const weekStart=getScheduleWeekStart();
+  const weekEnd=getScheduleWeekEnd(weekStart);
+  return state.changes.some(change=>change.action==="replace"
     &&change.lesson_number===lesson.lesson_number
     &&change.new_room===lesson.room
+    &&change.date>=weekStart
+    &&change.date<=weekEnd
+    &&getDayIndex(change.date)===lesson.day_index
     &&change.class_name!==lesson.class_name);
 }
 function visibleRows(group){
@@ -186,11 +189,12 @@ function matchesQuery(lesson,field,query){
 }
 function getScheduleGroups(){
   const groups=state.lessons.map(lesson=>({lesson,change:null}));
-  const date=getWarsawDate();
-  const dayIndex=getDayIndex(date);
-  if(dayIndex<0)return groups;
-  state.changes.filter(change=>change.date===date&&change.lesson_number!==null&&change.lesson_number!==undefined)
+  const weekStart=getScheduleWeekStart();
+  const weekEnd=getScheduleWeekEnd(weekStart);
+  state.changes.filter(change=>change.date>=weekStart&&change.date<=weekEnd&&change.lesson_number!==null&&change.lesson_number!==undefined)
     .forEach(change=>{
+      const dayIndex=getDayIndex(change.date);
+      if(dayIndex<0)return;
       const affected=groups.filter(group=>!group.change&&group.lesson.class_name===change.class_name&&group.lesson.day_index===dayIndex&&group.lesson.lesson_number===change.lesson_number&&groupMatches(group.lesson,change.group));
       if(affected.length){
         affected.forEach(group=>group.change=change);
@@ -204,6 +208,18 @@ function getScheduleGroups(){
       }
     });
   return groups;
+}
+function getScheduleWeekStart(){
+  if(/^\d{4}-\d{2}-\d{2}$/.test(state.meta.week_start||""))return state.meta.week_start;
+  const current=new Date(`${getWarsawDate()}T00:00:00Z`);
+  const day=current.getUTCDay();
+  current.setUTCDate(current.getUTCDate()-((day+6)%7)+(day===0?7:0));
+  return current.toISOString().slice(0,10);
+}
+function getScheduleWeekEnd(weekStart){
+  const end=new Date(`${weekStart}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate()+4);
+  return end.toISOString().slice(0,10);
 }
 function groupMatches(lesson,group){
   if(!group)return true;

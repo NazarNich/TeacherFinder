@@ -20,7 +20,7 @@ W wyszukiwaniu nauczyciela zastępstwo oznacza pierwotnego nauczyciela jako nieo
 
 Wyniki widoku nauczyciela dla zastępstwa pokazują pierwotnego nauczyciela z oznaczeniem „Nieobecny”; nazwisko zastępcy, nowe zajęcia i tekst ogłoszenia nie są tam wyświetlane.
 
-Wyniki można przełączyć z listy na tygodniową tabelę: wiersze pokazują numer i godzinę lekcji, a kolumny dni tygodnia. W widoku klasy zastępstwo jest wyróżnione bursztynowym kolorem, a podpowiedź pokazuje pierwotny plan; odwołane lekcje pozostają przekreślone. W widoku nauczyciela przekreślone są nieobecności, zaś zmiany sal pokazują bieżącą salę; w widoku sali aktualna obsada jest wyróżniona bursztynowym kolorem, a podpowiedź informuje o zastępstwie lub zmianie sali, bez pokazywania pierwotnego planu klasy.
+Wyniki można przełączyć z listy na tygodniową tabelę: wiersze pokazują numer i godzinę lekcji, a kolumny dni tygodnia. Zmiany z bieżącego tygodnia pojawiają się w dniu wskazanym w ogłoszeniu, również przed jego nadejściem. W widoku klasy zastępstwo jest wyróżnione bursztynowym kolorem, a podpowiedź pokazuje pierwotny plan; odwołane lekcje pozostają przekreślone. W widoku nauczyciela przekreślone są nieobecności, zaś zmiany sal pokazują bieżącą salę; w widoku sali aktualna obsada jest wyróżniona bursztynowym kolorem, a podpowiedź informuje o zastępstwie lub zmianie sali, bez pokazywania pierwotnego planu klasy.
 
 W wynikach sali przeniesione zajęcia pojawiają się tylko w aktualnej sali. Podpowiedź pokazuje nauczyciela, który jest teraz w sali, oraz informuje, czy zastąpił planowego nauczyciela w tej sali, czy sala była wolna.
 
