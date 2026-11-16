@@ -74,12 +74,13 @@ const TEACHER_CODE_BY_SURNAME = {
   Ziębacz:{initial:"s",code:"Zi"},
   Żalek:{initial:"a",code:"ŻA"}
 };
+const TEACHER_CODES = new Set(Object.values(TEACHER_CODE_BY_SURNAME).flatMap(entries=>(Array.isArray(entries)?entries:[entries]).map(entry=>normalize(entry.code))));
 const state = { mode: "teacher", view: "list", lessons: [], changes: [], meta: {} };
 const input = document.querySelector("#search-input");
 const results = document.querySelector("#results");
 
 const labels = {
-  teacher: ["KOD NAUCZYCIELA","Np. Ga, Zi, WE…","Nazwiska z zastępstw mają przypisane skróty z katalogu nauczycieli; niektórych skrótów może brakować w katalogu.","Wyszukaj nauczyciela"],
+  teacher: ["KOD NAUCZYCIELA","Np. Ga, Zi, WE…","Zastępstwa są wyświetlane jako kody z katalogu nauczycieli; niektórych kodów może brakować.","Wyszukaj nauczyciela"],
   room: ["NUMER SALI","Np. 204, SG3, Aula…","Wpisz numer lub oznaczenie sali.","Wyszukaj salę"],
   class: ["ODDZIAŁ","Np. 4B, 2A…","Wpisz symbol klasy, np. 4B.","Wyszukaj klasę"]
 };
@@ -161,7 +162,7 @@ function visibleRows(group){
     const replacement=rows.find(row=>row.status==="replacement");
     if(replacement){
       const tooltip=group.standalone
-        ?`Informacja: ${group.change.original_text||describeLesson(replacement.lesson)}`
+      ? "Zastępstwo z ogłoszenia"
         :`Planowo: ${describeLesson(group.lesson)}`;
       return[{...replacement,status:"class-current",displayTooltip:tooltip}];
     }
@@ -177,15 +178,23 @@ function visibleRows(group){
 }
 function matchesQuery(lesson,field,query){
   if(field!=="teacher")return normalize(lesson[field]).includes(query);
-  const teacher=String(lesson.teacher||"");
-  if(normalize(teacher).includes(query))return true;
-  const surname=normalize(teacher).split(/[\s.]+/).filter(Boolean).pop();
+  return normalize(getTeacherCode(lesson.teacher)).includes(query);
+}
+function getTeacherCode(teacher){
+  const value=String(teacher||"").trim();
+  if(!value)return"";
+  const normalized=normalize(value);
+  if(TEACHER_CODES.has(normalized))return value;
+  if(/^[a-ząćęłńóśźż]{1,3}$/i.test(value))return value;
+
+  const parts=value.replace(/^p\.\s*/i,"").split(/[\s.]+/).filter(Boolean);
+  const surname=normalize(parts[parts.length-1]||"");
   const entries=Object.entries(TEACHER_CODE_BY_SURNAME).find(([name])=>normalize(name)===surname)?.[1];
-  if(!entries)return false;
+  if(!entries)return"";
   const options=Array.isArray(entries)?entries:[entries];
-  const initial=normalize(teacher).match(/^([a-z])\.?\s+/i)?.[1];
+  const initial=parts.length>1?normalize(parts[0]):"";
   const matchingOptions=initial?options.filter(entry=>normalize(entry.initial)===initial):options;
-  return matchingOptions.some(entry=>normalize(entry.code).includes(query));
+  return matchingOptions.length===1?matchingOptions[0].code:"";
 }
 function getScheduleGroups(){
   const groups=state.lessons.map(lesson=>({lesson,change:null}));
@@ -265,16 +274,16 @@ function getScheduleEntries(group,row){
     if(group.change.action==="replace"){
       if(row.status==="class-current"){
         const tooltip=group.standalone
-          ?`Informacja: ${group.change.original_text||describeLesson(lesson)}`
+          ? "Zastępstwo z ogłoszenia"
           :`Planowo: ${describeLesson(group.lesson)}`;
         return[{lesson,status:"class-current",change:group.change,tooltip}];
       }
-      if(group.standalone)return[{lesson:planned,status:"class-current",change:group.change,tooltip:`Informacja: ${group.change.original_text||describeLesson(planned)}`}];
+      if(group.standalone)return[{lesson:planned,status:"class-current",change:group.change,tooltip:"Zastępstwo z ogłoszenia"}];
       const replacement=groupRows(group).find(row=>row.status==="replacement");
       return[{lesson:planned,status:"planned-changed",change:group.change,tooltip:replacement?`Teraz: ${describeLesson(replacement.lesson)}`:"Lekcja zmieniona"}];
     }
     if(group.change.action==="cancel"){
-      const notice=group.change.display_notice?`Informacja: ${group.change.original_text}`:"Lekcja odwołana";
+      const notice=group.change.display_notice?"Informacja z ogłoszenia":"Lekcja odwołana";
       return[{lesson:planned,status:"cancelled",change:group.change,tooltip:notice}];
     }
     return[{lesson:planned,status:"normal",tooltip:""}];
@@ -289,7 +298,7 @@ function getScheduleEntries(group,row){
 
   if(!group.change)return[{lesson,status:"normal",tooltip:""}];
   if(group.change.action==="cancel"){
-    return[{lesson,status:"cancelled",change:group.change,tooltip:group.change.display_notice?`Informacja: ${group.change.original_text}`:"Lekcja odwołana"}];
+    return[{lesson,status:"cancelled",change:group.change,tooltip:group.change.display_notice?"Informacja z ogłoszenia":"Lekcja odwołana"}];
   }
   if(group.change.action!=="replace")return[{lesson,status:"normal",tooltip:""}];
 
@@ -303,7 +312,7 @@ function getScheduleEntries(group,row){
   return[{lesson,status:row.status,change:group.change,tooltip:row.displayTooltip||""}];
 }
 function getRoomOccupancyTooltip(replacement,group){
-  const currentTeacher=replacement.teacher||"";
+  const currentTeacher=getTeacherCode(replacement.teacher)||"zastępstwo";
   const room=replacement.room||"";
   const occupants=state.lessons.filter(lesson=>lesson.day_index===replacement.day_index
     &&lesson.lesson_number===replacement.lesson_number
@@ -312,29 +321,30 @@ function getRoomOccupancyTooltip(replacement,group){
       ||lesson.class_name!==group.lesson.class_name
       ||lesson.group!==group.lesson.group
       ||lesson.teacher!==group.lesson.teacher));
-  const previousTeachers=[...new Set(occupants.map(lesson=>lesson.teacher).filter(Boolean))];
+  const previousTeachers=[...new Set(occupants.map(lesson=>getTeacherCode(lesson.teacher)).filter(Boolean))];
   if(previousTeachers.length){
     return`Zamiast ${previousTeachers.join(", ")} jest ${currentTeacher||"zastępstwo"}.`;
   }
   return`Sala ${room} była wolna. Teraz jest ${currentTeacher||"zastępstwo"}.`;
 }
 function describeLesson(lesson){
-  return[lesson.subject,lesson.teacher,lesson.room?`sala ${lesson.room}`:""].filter(Boolean).join(" · ")||"Zajęcia";
+  return[lesson.subject,getTeacherCode(lesson.teacher),lesson.room?`sala ${lesson.room}`:""].filter(Boolean).join(" · ")||"Zajęcia";
 }
 function renderScheduleEntry(entry){
   const lesson=entry.lesson;
+  const teacher=getTeacherCode(lesson.teacher);
   const title=state.mode==="teacher"
-    ?lesson.teacher||lesson.class_name
+    ?teacher||lesson.class_name
     :state.mode==="room"
-      ?`${lesson.teacher||"Zajęcia"} · ${lesson.class_name}`
+      ?`${teacher||"Zajęcia"} · ${lesson.class_name}`
       :lesson.subject||"Zajęcia";
   const details=state.mode==="teacher"
     ?[lesson.class_name,lesson.room?`sala ${lesson.room}`:""].filter(Boolean).join(" · ")
     :state.mode==="room"
       ?[lesson.subject,lesson.group?`grupa ${lesson.group}`:""].filter(Boolean).join(" · ")
-      :[lesson.class_name,lesson.teacher,lesson.room?`sala ${lesson.room}`:"",lesson.group?`grupa ${lesson.group}`:""].filter(Boolean).join(" · ");
+      :[lesson.class_name,teacher,lesson.room?`sala ${lesson.room}`:"",lesson.group?`grupa ${lesson.group}`:""].filter(Boolean).join(" · ");
   const tooltip=entry.tooltip||describeLesson(lesson);
-  const notice=entry.change?.display_notice&&entry.status==="cancelled"?`<small class="schedule-notice">${escapeHtml(entry.change.original_text)}</small>`:"";
+  const notice=entry.change?.display_notice&&entry.status==="cancelled"?'<small class="schedule-notice">Informacja z ogłoszenia</small>':"";
   return`<div class="schedule-entry schedule-${escapeHtml(entry.status)}" tabindex="0" title="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}">
     <span class="schedule-entry-title">${escapeHtml(title)}</span>${details?`<span class="schedule-entry-details">${escapeHtml(details)}</span>`:""}${state.mode==="room"&&entry.status==="room-current"?'<span class="schedule-entry-badge">Teraz</span>':""}${notice}
   </div>`;
@@ -348,11 +358,13 @@ function renderLesson(lesson,change,status,row){
     :state.mode==="teacher"&&status==="absent"?"Nieobecny"
     :status==="cancelled"?"Odwołano":status==="replacement"?(change.moved?"Przeniesiono":"Zastępstwo"):"";
   const roomNote=state.mode==="room"&&row?.displayTooltip?`<p class="change-note">${escapeHtml(row.displayTooltip)}</p>`:"";
-  const note=roomNote||(change?.original_text&&status!=="absent"&&(status!=="cancelled"||change.display_notice)?`<p class="change-note">${status==="cancelled"?"Informacja: ":"Zmiana: "}${escapeHtml(change.original_text)}</p>`:"");
+  const notice=status==="cancelled"&&change?.display_notice?'<p class="change-note">Informacja z ogłoszenia</p>':"";
+  const note=roomNote||notice;
   const subject=state.mode==="teacher"&&(status==="replacement"||status==="absent")?"":`<strong>${escapeHtml(lesson.subject||"Zajęcia")}</strong>`;
+  const teacher=getTeacherCode(lesson.teacher)||"Brak oznaczenia";
   return`<article class="lesson-card${status==="cancelled"?" lesson-cancelled":""}${status==="replacement"?" lesson-replacement":""}${status==="class-current"?" lesson-class-current":""}"${row?.displayTooltip?` title="${escapeHtml(row.displayTooltip)}"`:""}>
       <div class="lesson-time">${escapeHtml(lesson.time||"—")}<small>${escapeHtml(day)}${date}, lekcja ${escapeHtml(lesson.lesson_number)}</small></div>
-      <div class="lesson-main">${subject}${badge?`<span class="change-badge${status==="absent"?" absence-badge":""}">${escapeHtml(badge)}</span>`:""}<p>${escapeHtml(lesson.teacher||"Brak nauczyciela")} · ${escapeHtml(lesson.class_name)}${lesson.group?` · grupa ${escapeHtml(lesson.group)}`:""}</p>${note}</div>
+      <div class="lesson-main">${subject}${badge?`<span class="change-badge${status==="absent"?" absence-badge":""}">${escapeHtml(badge)}</span>`:""}<p>${escapeHtml(teacher)} · ${escapeHtml(lesson.class_name)}${lesson.group?` · grupa ${escapeHtml(lesson.group)}`:""}</p>${note}</div>
       <div class="lesson-room">${escapeHtml(lesson.room||"Brak sali")}</div>
     </article>`;
 }
