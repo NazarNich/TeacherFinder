@@ -1,12 +1,85 @@
 const DATA_URL = "data/lessons.json";
 const DAYS = ["Poniedziałek","Wtorek","Środa","Czwartek","Piątek"];
-const TEACHER_CODE_BY_SURNAME = {};
+const TEACHER_CODE_BY_SURNAME = {
+  Adamczyk:{initial:"a",code:"AA"},
+  Adamiak:{initial:"r",code:"XA"},
+  Bartusik:{initial:"a",code:"Ba"},
+  Bębnik:{initial:"e",code:"EB"},
+  Boncol:{initial:"a",code:"AN"},
+  Brodowska:{initial:"k",code:"Bk"},
+  Bubel:{initial:"k",code:"Bu"},
+  Buczek:{initial:"m",code:"MB"},
+  Cieniek:[{initial:"k",code:"Ci"},{initial:"s",code:"Cs"}],
+  Cięciel:{initial:"r",code:"CR"},
+  Czaplik:{initial:"a",code:"CA"},
+  Czyż:{initial:"k",code:"Cz"},
+  Dłubak:{initial:"p",code:"Dł"},
+  Domagała:{initial:"a",code:"AD"},
+  Ducka:{initial:"k",code:"Du"},
+  Dudek:{initial:"i",code:"Dd"},
+  Ferdyn:{initial:"ł",code:"FŁ"},
+  Gadacz:{initial:"j",code:"Py"},
+  Gajewska:{initial:"a",code:"L1"},
+  Gawin:{initial:"b",code:"Ga"},
+  Głowacka:{initial:"a",code:"AŁ"},
+  Goj:{initial:"j",code:"Go"},
+  Gowin:{initial:"m",code:"GM"},
+  Górny:{initial:"b",code:"BÓ"},
+  Grela:{initial:"a",code:"Gr"},
+  Gurowiec:{initial:"k",code:"Gu"},
+  Haida:{initial:"m",code:"MH"},
+  Horzela:{initial:"d",code:"DH"},
+  Ibrom:{initial:"o",code:"IO"},
+  Kaim:{initial:"m",code:"Ka"},
+  Kapica:{initial:"r",code:"KI"},
+  Kempys:{initial:"d",code:"Ke"},
+  Kotalczyk:{initial:"a",code:"KT"},
+  Kowalska:{initial:"r",code:"RO"},
+  Krajcer:{initial:"r",code:"RK"},
+  Kruk:{initial:"a",code:"K2"},
+  Krużołek:{initial:"c",code:"Kr"},
+  Krzykowska:{initial:"p",code:"PR"},
+  Laskowska:{initial:"a",code:"Lr"},
+  Łukaszczyk:{initial:"m",code:"MŁ"},
+  Madalińska:{initial:"a",code:"AM"},
+  Madeja:[{initial:"k",code:"KM"},{initial:"o",code:"OM"}],
+  Markusik:{initial:"d",code:"DM"},
+  Maziarz:{initial:"a",code:"Mr"},
+  Musiałek:{initial:"k",code:"Mk"},
+  "Mzyk-Porada":{initial:"m",code:"Mz"},
+  "Nobis-Biernacka":{initial:"s",code:"SN"},
+  Oleśkiewicz:{initial:"j",code:"JL"},
+  Onak:{initial:"b",code:"On"},
+  Opara:{initial:"a",code:"AO"},
+  Piasecki:{initial:"j",code:"Pi"},
+  Podgórska:{initial:"m",code:"MP"},
+  Schaefer:{initial:"p",code:"PS"},
+  Smyczek:{initial:"m",code:"Sm"},
+  Spendel:{initial:"r",code:"Sp"},
+  Strzelec:{initial:"e",code:"ES"},
+  Sukiennik:{initial:"k",code:"Su"},
+  Szczepańczyk:{initial:"a",code:"AE"},
+  Szeremeta:{initial:"m",code:"ZS"},
+  Świtała:{initial:"p",code:"PŚ"},
+  Totoś:{initial:"w",code:"To"},
+  Wachla:{initial:"r",code:"Wa"},
+  Wachowiak:{initial:"a",code:"Ww"},
+  Walaszek:{initial:"t",code:"Wt"},
+  Warchoł:{initial:"g",code:"GW"},
+  Wąsowicz:{initial:"e",code:"WE"},
+  "Wesołowski-Schwingenschlögel":{initial:"b",code:"BW"},
+  Wieczorek:{initial:"i",code:"Wi"},
+  Woźniczka:{initial:"m",code:"MO"},
+  Zając:{initial:"i",code:"Za"},
+  Ziębacz:{initial:"s",code:"Zi"},
+  Żalek:{initial:"a",code:"ŻA"}
+};
 const state = { mode: "teacher", view: "list", lessons: [], changes: [], meta: {} };
 const input = document.querySelector("#search-input");
 const results = document.querySelector("#results");
 
 const labels = {
-  teacher: ["KOD NAUCZYCIELA","Np. Ga, Zi, WE…","Wpisz kod nauczyciela, np. Ga albo WE. Wyszukiwanie po inicjałach może być niedokładne — nie wszystkie nazwiska są przypisane do skrótów z planu.","Wyszukaj nauczyciela"],
+  teacher: ["KOD NAUCZYCIELA","Np. Ga, Zi, WE…","Nazwiska z zastępstw mają przypisane skróty z katalogu nauczycieli; niektórych skrótów może brakować w katalogu.","Wyszukaj nauczyciela"],
   room: ["NUMER SALI","Np. 204, SG3, Aula…","Wpisz numer lub oznaczenie sali.","Wyszukaj salę"],
   class: ["ODDZIAŁ","Np. 4B, 2A…","Wpisz symbol klasy, np. 4B.","Wyszukaj klasę"]
 };
@@ -104,8 +177,12 @@ function matchesQuery(lesson,field,query){
   const teacher=String(lesson.teacher||"");
   if(normalize(teacher).includes(query))return true;
   const surname=normalize(teacher).split(/[\s.]+/).filter(Boolean).pop();
-  const code=Object.entries(TEACHER_CODE_BY_SURNAME).find(([name])=>normalize(name)===surname)?.[1];
-  return Boolean(code&&normalize(code).includes(query));
+  const entries=Object.entries(TEACHER_CODE_BY_SURNAME).find(([name])=>normalize(name)===surname)?.[1];
+  if(!entries)return false;
+  const options=Array.isArray(entries)?entries:[entries];
+  const initial=normalize(teacher).match(/^([a-z])\.?\s+/i)?.[1];
+  const matchingOptions=initial?options.filter(entry=>normalize(entry.initial)===initial):options;
+  return matchingOptions.some(entry=>normalize(entry.code).includes(query));
 }
 function getScheduleGroups(){
   const groups=state.lessons.map(lesson=>({lesson,change:null}));

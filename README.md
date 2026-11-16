@@ -12,9 +12,9 @@ Wyszukiwarka planowych zajęć nauczycieli, sal i klas na podstawie publicznie o
 
 Importer zapisuje podstawowy plan w `lessons`, a ogłoszenia ze zmianami osobno w `changes`. Zachowuje oryginalny tekst każdego ogłoszenia; lekcje z zastępstwem są pokazywane jako skreślony plan i oznaczona zamiana, a odwołane lekcje jako skreślony plan bez nowego wpisu. Ogłoszenie o zwolnieniu do domu jest wyświetlane osobno jako zwykły tekst, bez przekreślenia; samo przekreślenie dotyczy tylko odwołanych lekcji. W widoku nauczyciela zastępstwo pokazuje aktualnego nauczyciela i salę bez nowego przedmiotu, a anulowane zajęcia nie są liczone jako jego obecність. W widoku sali zastępstwo pokazuje zarówno planowanego, jak i aktualnego nauczyciela; widok klasy zachowuje pełne informacje o zmianie. Zmiany dotyczące konkretnej grupy są stosowane wyłącznie do pasującej grupy. Synchronizacja obu źródeł odbywa się przez `python scripts/import_plans.py`.
 
-Zastępstwo wyświetla nazwisko nauczyciela w formie podanej w ogłoszeniu. W `app.js` można uzupełnić `TEACHER_CODE_BY_SURNAME` w formacie `"Nazwisko": "XX"`, aby wyszukiwanie zastępstwa działało również po dwuliterowym kodzie z planu. Słownik jest na razie pusty, aby nie przypisywać kodów bez potwierdzonego źródła.
+Zastępstwo wyświetla nazwisko nauczyciela w formie podanej w ogłoszeniu. `TEACHER_CODE_BY_SURNAME` w `app.js` zawiera kody i inicjały imion odczytane z katalogu `teachers.js`, dzięki czemu zastępstwo można wyszukać również po skrócie z planu. Ogłoszenia zapisane jako inicjał imienia i nazwisko są dopasowywane przy użyciu inicjału; osoby o tym samym nazwisku są rozróżniane.
 
-Wyszukiwanie nauczyciela po inicjałach może być niedokładne, ponieważ nie ma pełnego przypisania nazwisk nauczycieli do skrótów użytych w planach.
+Wyszukiwanie zastępstwa po kodzie korzysta z katalogu nauczycieli; jeśli nazwiska lub skrótu nie ma w katalogu, wyszukiwanie po kodzie może nie znaleźć zastępstwa.
 
 W wyszukiwaniu nauczyciela zastępstwo oznacza pierwotnego nauczyciela jako nieobecnego, bez wyświetlania danych zastępcy. Gdy zmienia się tylko sala, widok nauczyciela pokazuje bieżącą salę.
 
