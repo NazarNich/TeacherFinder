@@ -127,7 +127,7 @@ function render(){
     :matches.flatMap(result=>result.rows.map(row=>renderLesson(row.lesson,row.change,row.status,row))).join("");
 }
 function getResultRows(group,query,field,exactClassMatch){
-  const rows=visibleRows(group);
+  const rows=state.mode==="teacher"?getTeacherResultRows(group,query):visibleRows(group);
   if(state.mode==="class"&&exactClassMatch){
     return normalize(group.lesson.class_name)===query?rows:[];
   }
@@ -144,6 +144,18 @@ function getResultRows(group,query,field,exactClassMatch){
     }
     return row;
   });
+}
+function getTeacherResultRows(group,query){
+  if(group.change?.action==="replace"&&group.change.new_teacher&&!group.standalone){
+    const rows=[];
+    if(matchesQuery(group.lesson,"teacher",query)){
+      rows.push({lesson:group.lesson,change:group.change,status:"absent"});
+    }
+    const replacement=groupRows(group).find(row=>row.status==="replacement");
+    if(replacement&&matchesQuery(replacement.lesson,"teacher",query))rows.push(replacement);
+    return rows;
+  }
+  return visibleRows(group);
 }
 function isRoomUsedByReplacement(lesson){
   const weekStart=getScheduleWeekStart();

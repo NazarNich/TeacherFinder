@@ -16,9 +16,9 @@ W interfejsie nauczyciele z ogłoszeń są wyświetlani jako kody z `TEACHER_COD
 
 Wyszukiwanie zastępstwa po kodzie korzysta z katalogu nauczycieli; jeśli nazwiska lub skrótu nie ma w katalogu, wyszukiwanie po kodzie może nie znaleźć zastępstwa.
 
-W wyszukiwaniu nauczyciela zastępstwo oznacza pierwotnego nauczyciela jako nieobecnego, bez wyświetlania danych zastępcy. Gdy zmienia się tylko sala, widok nauczyciela pokazuje bieżącą salę.
+W wyszukiwaniu nauczyciela pierwotny nauczyciel zastępowanej lekcji jest oznaczany jako nieobecny, a wyszukanie kodu zastępcy pokazuje jego zastępstwo. Gdy zmienia się tylko sala, widok nauczyciela pokazuje bieżącą salę.
 
-Wyniki widoku nauczyciela dla zastępstwa pokazują pierwotnego nauczyciela z oznaczeniem „Nieobecny”; nazwisko zastępcy, nowe zajęcia i tekst ogłoszenia nie są tam wyświetlane.
+Wyniki widoku nauczyciela pokazują kody nauczycieli, nie nazwiska ze strony ogłoszeń; tekst ogłoszenia nie jest wyświetlany.
 
 Wyniki można przełączyć z listy na tygodniową tabelę: wiersze pokazują numer i godzinę lekcji, a kolumny dni tygodnia. Zmiany z bieżącego tygodnia pojawiają się w dniu wskazanym w ogłoszeniu, również przed jego nadejściem. W widoku klasy zastępstwo jest wyróżnione bursztynowym kolorem, a podpowiedź pokazuje pierwotny plan; odwołane lekcje pozostają przekreślone. W widoku nauczyciela przekreślone są nieobecności, zaś zmiany sal pokazują bieżącą salę; w widoku sali aktualna obsada jest wyróżniona bursztynowym kolorem, a podpowiedź informuje o zastępstwie lub zmianie sali, bez pokazywania pierwotnego planu klasy.
 
