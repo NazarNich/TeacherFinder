@@ -82,7 +82,7 @@ const results = document.querySelector("#results");
 const labels = {
   teacher: ["KOD NAUCZYCIELA","Np. Ga, Zi, WE…","Zastępstwa są wyświetlane jako kody z katalogu nauczycieli; niektórych kodów może brakować.","Wyszukaj nauczyciela"],
   room: ["NUMER SALI","Np. 204, SG3, Aula…","Wpisz numer lub oznaczenie sali.","Wyszukaj salę"],
-  class: ["ODDZIAŁ","Np. 4B, 2A…","Wpisz symbol klasy, np. 4B.","Wyszukaj klasę"]
+  class: ["KLASA","Np. 4B, 2A…","Wpisz symbol klasy, np. 4B.","Wyszukaj klasę"]
 };
 
 function normalize(value){return String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();}
@@ -116,9 +116,10 @@ function render(){
   if(!query){showEmpty("⌕","Wpisz kod, salę lub klasę","Wyniki pojawią się tutaj po wyszukaniu.");return;}
   const field=state.mode==="teacher"?"teacher":state.mode==="room"?"room":"class_name";
   const exactClassMatch=state.mode==="class"&&state.lessons.some(lesson=>normalize(lesson.class_name)===query);
-  const matches=getScheduleGroups().map(group=>({group,rows:getResultRows(group,query,field,exactClassMatch)}))
+  const groupedMatches=getScheduleGroups().map(group=>({group,rows:getResultRows(group,query,field,exactClassMatch)}))
     .filter(result=>result.rows.length)
     .sort((a,b)=>(a.group.lesson.day_index-b.group.lesson.day_index)||(a.group.lesson.lesson_number-b.group.lesson.lesson_number)||a.group.lesson.class_name.localeCompare(b.group.lesson.class_name));
+  const matches=state.mode==="room"?mergeWholeClassRoomResults(groupedMatches):groupedMatches;
   document.querySelector("#result-count").textContent=`${matches.length} ${plural(matches.length)}`;
   if(!matches.length){showEmpty("⌕","Brak wyników",state.lessons.length?"Nie znaleziono pasujących lekcji. Sprawdź wpisaną frazę.":"Baza nie zawiera jeszcze pobranych planów. Uruchom importer zgodnie z instrukcją README.");return;}
   results.classList.toggle("schedule-results",state.view==="table");
@@ -144,6 +145,38 @@ function getResultRows(group,query,field,exactClassMatch){
     }
     return row;
   });
+}
+function mergeWholeClassRoomResults(matches){
+  const merged=[];
+  const processed=new Set();
+  matches.forEach(result=>{
+    const change=result.group.change;
+    if(!change||change.action!=="replace"||String(change.group||"").trim()||!change.new_room){
+      merged.push(result);
+      return;
+    }
+    if(processed.has(change))return;
+    processed.add(change);
+    const affected=matches.filter(candidate=>candidate.group.change===change);
+    const replacement=affected.flatMap(candidate=>candidate.rows).find(row=>row.status==="replacement");
+    if(!replacement)return;
+    const previousGroups=[...new Set(state.lessons
+      .filter(lesson=>lesson.class_name===change.class_name
+        &&lesson.day_index===getDayIndex(change.date)
+        &&lesson.lesson_number===change.lesson_number
+        &&lesson.room===change.new_room
+        &&lesson.group)
+      .map(lesson=>lesson.group))];
+    const tooltip=previousGroups.length
+      ?`Zmiana z grupy ${previousGroups.join(", ")} na całą klasę.`
+      :"Zajęcia dla całej klasy.";
+    const lesson={...replacement.lesson,group:""};
+    const group={...affected[0].group,lesson:{...affected[0].group.lesson,group:""}};
+    merged.push({group,rows:[{...replacement,lesson,displayTooltip:tooltip,roomWholeClassChange:true}]});
+  });
+  return merged.sort((a,b)=>(a.group.lesson.day_index-b.group.lesson.day_index)
+    ||(a.group.lesson.lesson_number-b.group.lesson.lesson_number)
+    ||a.group.lesson.class_name.localeCompare(b.group.lesson.class_name));
 }
 function getTeacherResultRows(group,query){
   if(group.change?.action==="replace"&&group.change.new_teacher&&!group.standalone){
@@ -254,11 +287,23 @@ function groupRows(group){
   if(!group.change)return[{lesson:group.lesson,change:null,status:"normal"}];
   if(group.change.action==="cancel")return[{lesson:group.lesson,change:group.change,status:"cancelled"}];
   if(group.change.action!=="replace")return[{lesson:group.lesson,change:null,status:"normal"}];
-  if(group.standalone)return[{lesson:group.lesson,change:group.change,status:"replacement"}];
+  if(group.standalone)return[{lesson:{...group.lesson,subject:getReplacementSubject(group)},change:group.change,status:"replacement"}];
   return[
     {lesson:group.lesson,change:group.change,status:"cancelled"},
-    {lesson:{...group.lesson,subject:group.change.new_subject||group.lesson.subject,teacher:group.change.new_teacher||group.lesson.teacher,room:group.change.new_room||group.lesson.room},change:group.change,status:"replacement"}
+    {lesson:{...group.lesson,subject:getReplacementSubject(group),teacher:group.change.new_teacher||group.lesson.teacher,room:group.change.new_room||group.lesson.room},change:group.change,status:"replacement"}
   ];
+}
+function getReplacementSubject(group){
+  if(group.change.new_subject)return group.change.new_subject;
+  const sourceLessonNumber=Number(String(group.change.moved_from||"").match(/\d+/)?.[0]);
+  if(!sourceLessonNumber)return group.lesson.subject;
+  const sourceLessons=state.lessons.filter(lesson=>lesson.class_name===group.lesson.class_name
+    &&lesson.day_index===getDayIndex(group.change.date)
+    &&lesson.lesson_number===sourceLessonNumber);
+  const sourceLesson=sourceLessons.find(lesson=>lesson.group===group.lesson.group)
+    ||(group.change.group?sourceLessons.find(lesson=>groupMatches(lesson,group.change.group)):null)
+    ||sourceLessons[0];
+  return sourceLesson?.subject||group.lesson.subject;
 }
 function renderScheduleTable(resultsToRender){
   const rows=new Map();
@@ -349,12 +394,12 @@ function renderScheduleEntry(entry){
   const title=state.mode==="teacher"
     ?teacher||lesson.class_name
     :state.mode==="room"
-      ?`${teacher||"Zajęcia"} · ${lesson.class_name}`
+      ?teacher||"Zajęcia"
       :lesson.subject||"Zajęcia";
   const details=state.mode==="teacher"
     ?[lesson.class_name,lesson.group?`grupa ${lesson.group}`:"",lesson.room?`sala ${lesson.room}`:""].filter(Boolean).join(" · ")
     :state.mode==="room"
-      ?[lesson.subject,lesson.group?`grupa ${lesson.group}`:""].filter(Boolean).join(" · ")
+      ?[lesson.class_name,lesson.subject,lesson.group?`grupa ${lesson.group}`:""].filter(Boolean).join(" · ")
       :[lesson.class_name,teacher,lesson.room?`sala ${lesson.room}`:"",lesson.group?`grupa ${lesson.group}`:""].filter(Boolean).join(" · ");
   const tooltip=entry.tooltip||describeLesson(lesson);
   const notice=entry.change?.display_notice&&entry.status==="cancelled"?'<small class="schedule-notice">Informacja z ogłoszenia</small>':"";
@@ -376,7 +421,7 @@ function renderLesson(lesson,change,status,row){
   const note=roomNote||notice;
   const subject=state.mode==="teacher"&&(status==="replacement"||status==="absent")?"":`<strong>${escapeHtml(lesson.subject||"Zajęcia")}</strong>`;
   const teacher=getTeacherCode(lesson.teacher)||"Brak oznaczenia";
-  return`<article class="lesson-card${status==="cancelled"?" lesson-cancelled":""}${status==="replacement"?" lesson-replacement":""}${status==="class-current"?" lesson-class-current":""}"${row?.displayTooltip?` title="${escapeHtml(row.displayTooltip)}"`:""}>
+  return`<article class="lesson-card${status==="cancelled"?" lesson-cancelled":""}${status==="replacement"?" lesson-replacement":""}${status==="class-current"?" lesson-class-current":""}${row?.roomWholeClassChange?" lesson-room-current":""}"${row?.displayTooltip?` title="${escapeHtml(row.displayTooltip)}"`:""}>
       <div class="lesson-time">${escapeHtml(lesson.time||"—")}<small>${escapeHtml(day)}${date}, lekcja ${escapeHtml(lesson.lesson_number)}</small></div>
       <div class="lesson-main">${subject}${badge?`<span class="change-badge${status==="absent"?" absence-badge":""}">${escapeHtml(badge)}</span>`:""}<p>${escapeHtml(teacher)} · ${escapeHtml(lesson.class_name)}${lesson.group?` · grupa ${escapeHtml(lesson.group)}`:""}</p>${note}</div>
       <div class="lesson-room">${escapeHtml(lesson.room||"Brak sali")}</div>

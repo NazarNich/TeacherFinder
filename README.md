@@ -4,9 +4,9 @@ Wyszukiwarka planowych zajęć nauczycieli, sal i klas na podstawie publicznie o
 
 ## Funkcje
 
-- wyszukiwanie po kodzie nauczyciela, sali i oddziale;
+- wyszukiwanie po kodzie nauczyciela, sali i klasie;
 - widok wyników z dniem, numerem lekcji, godziną, przedmiotem, salą, klasą i grupą (jeśli dotyczy);
-- automatyczne wykrywanie oddziałów.
+- automatyczne wykrywanie klas.
 - pobieranie zmian z [oficjalnej strony ZS1](https://www.zs-1.edu.pl/index.php/plan-lekcji/zmiany-do-planu);
 - wyświetlanie zastępstw i odwołań tylko w dniu wskazanym w zmianie, bez modyfikowania oryginalnych lekcji.
 
@@ -25,6 +25,10 @@ Wyniki można przełączyć z listy na tygodniową tabelę: wiersze pokazują nu
 W wynikach sali przeniesione zajęcia pojawiają się tylko w aktualnej sali. Podpowiedź pokazuje nauczyciela, który jest teraz w sali, oraz informuje, czy zastąpił planowego nauczyciela w tej sali, czy sala była wolna.
 
 Surowy tekst ogłoszeń pozostaje zapisany w danych, ale nie jest wyświetlany. Nazwiska zastępców są zamieniane na kody z katalogu; gdy kodu nie da się ustalić, interfejs nie pokazuje nazwiska.
+
+Przy przeniesieniu lekcji przedmiot jest pobierany z pierwotnego numeru lekcji wskazanego w ogłoszeniu, a nie z planu zajęć, na które przeniesiono lekcję.
+
+W widoku sali zamiana obejmująca całą klasę jest pokazywana jako jeden bursztynowy wpis, nawet jeśli wcześniej dotyczyła tylko jednej grupy; podpowiedź wskazuje zmianę zakresu. Pozostałe widoki zachowują osobne grupy.
 
 ## Publikacja w GitHub Pages
 
